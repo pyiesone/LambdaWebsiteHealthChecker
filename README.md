@@ -12,9 +12,10 @@ This project deploys one AWS Lambda function that checks a website on a schedule
 
 1. EventBridge invokes the Lambda function on a schedule.
 2. The Lambda function sends an HTTP GET request to the URL defined in the GitHub repository variable `TARGET_URL`.
-3. If the site returns an unexpected status code or the request fails, the function calls TextMeBot's API to send a WhatsApp message to your number.
+3. If the site returns an unexpected status code or the request fails, the function calls TextMeBot's API to send a WhatsApp message to each phone number listed in the GitHub repository variable `TEXTMEBOT_PHONES`.
+4. When multiple recipients are configured, the function sends the first TextMeBot request immediately, waits 5 seconds, then sends the next request.
 
-The manual test Lambda sends a WhatsApp message immediately when you invoke it from the AWS console.
+The manual test Lambda sends WhatsApp test messages when you invoke it from the AWS console and returns delivery details for each recipient.
 
 ## GitHub repository setup
 
@@ -23,12 +24,12 @@ Create a GitHub repository from this folder, then add these repository secrets:
 - `AWS_ROLE_TO_ASSUME`: IAM role ARN that GitHub Actions will assume through OIDC.
 - `AWS_ACCOUNT_ID`: your AWS account ID.
 - `LAMBDA_EXECUTION_ROLE_ARN`: IAM role ARN used by the Lambda function itself.
-- `TEXTMEBOT_PHONES`: required. A comma-separated list of WhatsApp numbers in the format expected by TextMeBot.
 - `TEXTMEBOT_API_KEY`: your TextMeBot API key.
 
-Add these repository variables if you want to override defaults:
+Add these repository variables:
 
 - `TARGET_URL`: required. The website URL to check, for example `https://example.com/`.
+- `TEXTMEBOT_PHONES`: required. A comma-separated list of WhatsApp numbers in the format expected by TextMeBot.
 - `AWS_REGION`: defaults to `us-east-1`.
 - `LAMBDA_FUNCTION_NAME`: defaults to `website-health-checker`.
 - `MANUAL_TEST_LAMBDA_FUNCTION_NAME`: defaults to `website-health-checker-manual-test`.
@@ -80,10 +81,13 @@ Or send a custom WhatsApp message:
 }
 ```
 
-The manual test Lambda uses the same `TEXTMEBOT_PHONES` and `TEXTMEBOT_API_KEY` secrets as the health checker. If the invocation succeeds, every listed recipient should receive a WhatsApp message.
+The manual test Lambda uses the same `TEXTMEBOT_PHONES` variable and `TEXTMEBOT_API_KEY` secret as the health checker. If the invocation succeeds, every listed recipient should receive a WhatsApp message.
+
+If TextMeBot rejects a request, the Lambda response includes per-recipient delivery results instead of failing with an uncaught exception. The manual test Lambda returns HTTP `502` when one or more TextMeBot deliveries fail.
 
 ## Notes
 
 - The current implementation sends an alert on every failing invocation. If you want alert suppression or recovery notifications, add persistent state with DynamoDB or SSM Parameter Store.
-- Store recipients only in the GitHub repository secret `TEXTMEBOT_PHONES`, for example `+10000000000,+20000000000`.
+- Store recipients only in the GitHub repository variable `TEXTMEBOT_PHONES`, for example `+10000000000,+20000000000`.
+- With multiple recipients, TextMeBot requests are sent sequentially with a 5-second delay between recipients.
 - TextMeBot's documented text message endpoint is `https://api.textmebot.com/send.php?recipient=[phone number]&apikey=[your apikey]&text=[text to send]`.

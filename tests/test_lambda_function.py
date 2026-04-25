@@ -1,6 +1,7 @@
 import json
 import os
 import unittest
+from io import BytesIO
 from http.client import RemoteDisconnected
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
@@ -69,6 +70,38 @@ class CheckWebsiteTests(unittest.TestCase):
 
 
 class LambdaHandlerTests(unittest.TestCase):
+    @patch("src.lambda_function.time.sleep")
+    @patch("src.lambda_function.send_textmebot_alert")
+    def test_send_textmebot_alerts_waits_between_recipients(self, mock_send_textmebot_alert, mock_sleep):
+        mock_send_textmebot_alert.return_value = {"success": True, "status_code": 200, "body": "ok"}
+
+        results = lambda_function.send_textmebot_alerts(
+            ["+10000000000", "+20000000000"],
+            "secret",
+            "test",
+            5,
+        )
+
+        self.assertEqual(len(results), 2)
+        self.assertEqual(mock_send_textmebot_alert.call_count, 2)
+        mock_sleep.assert_called_once_with(5)
+
+    @patch("src.lambda_function.request.urlopen")
+    def test_send_textmebot_alert_returns_failure_on_http_error(self, mock_urlopen):
+        mock_urlopen.side_effect = HTTPError(
+            url="https://api.textmebot.com/send.php",
+            code=403,
+            msg="Forbidden",
+            hdrs=None,
+            fp=BytesIO(b"forbidden"),
+        )
+
+        result = lambda_function.send_textmebot_alert("+10000000000", "secret", "test", 5)
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["status_code"], 403)
+        self.assertEqual(result["error"], "TextMeBot returned HTTP 403.")
+
     @patch("src.lambda_function.send_textmebot_alerts")
     @patch("src.lambda_function.check_website")
     def test_returns_200_without_alert_when_healthy(self, mock_check_website, mock_send_textmebot_alerts):
@@ -88,8 +121,8 @@ class LambdaHandlerTests(unittest.TestCase):
     def test_returns_503_and_alert_payload_when_unhealthy(self, mock_check_website, mock_send_textmebot_alerts):
         mock_check_website.return_value = (False, "Website returned HTTP 503.")
         mock_send_textmebot_alerts.return_value = [
-            {"recipient": "+10000000000", "status_code": 200, "body": "ok"},
-            {"recipient": "+20000000000", "status_code": 200, "body": "ok"},
+            {"recipient": "+10000000000", "success": True, "status_code": 200, "body": "ok", "error": None},
+            {"recipient": "+20000000000", "success": True, "status_code": 200, "body": "ok", "error": None},
         ]
         os.environ["TARGET_URL"] = "https://example.com/"
         os.environ["TEXTMEBOT_PHONES"] = "+10000000000,+20000000000"
@@ -103,7 +136,7 @@ class LambdaHandlerTests(unittest.TestCase):
 
     @patch("src.lambda_function.send_textmebot_alerts")
     def test_manual_test_handler_sends_message(self, mock_send_textmebot_alerts):
-        mock_send_textmebot_alerts.return_value = [{"recipient": "+10000000000", "status_code": 200, "body": "ok"}]
+        mock_send_textmebot_alerts.return_value = [{"recipient": "+10000000000", "success": True, "status_code": 200, "body": "ok", "error": None}]
         os.environ["TEXTMEBOT_PHONES"] = "+10000000000"
         os.environ["TEXTMEBOT_API_KEY"] = "secret"
 
@@ -114,6 +147,21 @@ class LambdaHandlerTests(unittest.TestCase):
         payload = json.loads(response["body"])
         self.assertEqual(payload["alerts"][0]["status_code"], 200)
         self.assertEqual(payload["message"], "Manual TextMeBot test message sent.")
+
+    @patch("src.lambda_function.send_textmebot_alerts")
+    def test_manual_test_handler_returns_502_when_delivery_fails(self, mock_send_textmebot_alerts):
+        mock_send_textmebot_alerts.return_value = [
+            {"recipient": "+10000000000", "success": False, "status_code": 403, "body": "forbidden", "error": "TextMeBot returned HTTP 403."}
+        ]
+        os.environ["TEXTMEBOT_PHONES"] = "+10000000000"
+        os.environ["TEXTMEBOT_API_KEY"] = "secret"
+
+        response = lambda_function.manual_test_handler({}, {})
+
+        self.assertEqual(response["statusCode"], 502)
+        payload = json.loads(response["body"])
+        self.assertFalse(payload["healthy"])
+        self.assertEqual(payload["alerts"][0]["status_code"], 403)
 
 
 if __name__ == "__main__":

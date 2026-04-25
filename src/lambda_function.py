@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from http.client import RemoteDisconnected
 from typing import Iterable
@@ -14,6 +15,7 @@ LOGGER.setLevel(logging.INFO)
 TEXTMEBOT_ENDPOINT = "https://api.textmebot.com/send.php"
 DEFAULT_TIMEOUT_SECONDS = 10
 DEFAULT_EXPECTED_STATUS_CODES = {200}
+TEXTMEBOT_DELAY_SECONDS = 5
 
 
 def get_env(name: str, default: str | None = None, required: bool = False) -> str:
@@ -99,25 +101,62 @@ def send_textmebot_alert(recipient: str, api_key: str, message: str, timeout_sec
     )
     alert_url = f"{TEXTMEBOT_ENDPOINT}?{query}"
 
-    with request.urlopen(alert_url, timeout=timeout_seconds) as response:
-        body = response.read().decode("utf-8", errors="replace")
+    try:
+        with request.urlopen(alert_url, timeout=timeout_seconds) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            return {
+                "success": True,
+                "status_code": response.getcode(),
+                "body": body,
+            }
+    except error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
         return {
-            "status_code": response.getcode(),
+            "success": False,
+            "status_code": exc.code,
             "body": body,
+            "error": f"TextMeBot returned HTTP {exc.code}.",
+        }
+    except error.URLError as exc:
+        reason = getattr(exc, "reason", "unknown network error")
+        return {
+            "success": False,
+            "status_code": None,
+            "body": "",
+            "error": f"TextMeBot request failed: {reason}.",
+        }
+    except RemoteDisconnected:
+        return {
+            "success": False,
+            "status_code": None,
+            "body": "",
+            "error": "TextMeBot request failed: remote server closed the connection.",
+        }
+    except TimeoutError:
+        return {
+            "success": False,
+            "status_code": None,
+            "body": "",
+            "error": "TextMeBot request timed out.",
         }
 
 
 def send_textmebot_alerts(recipients: Iterable[str], api_key: str, message: str, timeout_seconds: int) -> list[dict]:
+    recipients_list = list(recipients)
     results = []
-    for recipient in recipients:
+    for index, recipient in enumerate(recipients_list):
         alert_result = send_textmebot_alert(recipient, api_key, message, timeout_seconds)
         results.append(
             {
                 "recipient": recipient,
+                "success": alert_result["success"],
                 "status_code": alert_result["status_code"],
                 "body": alert_result["body"],
+                "error": alert_result.get("error"),
             }
         )
+        if index < len(recipients_list) - 1:
+            time.sleep(TEXTMEBOT_DELAY_SECONDS)
     return results
 
 
@@ -153,6 +192,7 @@ def lambda_handler(event, context):
     alert_message = build_alert_message(target_url, health_message)
     alert_results = send_textmebot_alerts(recipients, api_key, alert_message, timeout_seconds)
     result["alerts"] = alert_results
+    result["alert_failures"] = [item for item in alert_results if not item["success"]]
 
     LOGGER.warning("Health check failed and alert was sent: %s", json.dumps(result))
     return {
@@ -169,13 +209,14 @@ def manual_test_handler(event, context):
 
     test_message = build_manual_test_message(custom_message)
     alert_results = send_textmebot_alerts(recipients, api_key, test_message, timeout_seconds)
+    failed_alerts = [item for item in alert_results if not item["success"]]
     result = {
-        "healthy": True,
-        "message": "Manual TextMeBot test message sent.",
+        "healthy": not failed_alerts,
+        "message": "Manual TextMeBot test message sent." if not failed_alerts else "Manual TextMeBot test encountered delivery failures.",
         "alerts": alert_results,
     }
     LOGGER.info("Manual TextMeBot test executed: %s", json.dumps(result))
     return {
-        "statusCode": 200,
+        "statusCode": 200 if not failed_alerts else 502,
         "body": json.dumps(result),
     }
