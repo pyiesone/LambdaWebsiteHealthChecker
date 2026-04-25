@@ -2,6 +2,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+from http.client import RemoteDisconnected
 from typing import Iterable
 from urllib import error, parse, request
 
@@ -64,6 +65,8 @@ def check_website(url: str, timeout_seconds: int, expected_status_codes: Iterabl
     except error.URLError as exc:
         reason = getattr(exc, "reason", "unknown network error")
         return False, f"Website request failed: {reason}."
+    except RemoteDisconnected:
+        return False, "Website request failed: remote server closed the connection."
     except TimeoutError:
         return False, "Website request timed out."
 

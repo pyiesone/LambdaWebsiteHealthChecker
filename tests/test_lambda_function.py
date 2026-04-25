@@ -1,6 +1,7 @@
 import json
 import os
 import unittest
+from http.client import RemoteDisconnected
 from unittest.mock import Mock, patch
 from urllib.error import HTTPError, URLError
 
@@ -50,6 +51,15 @@ class CheckWebsiteTests(unittest.TestCase):
 
         self.assertFalse(healthy)
         self.assertIn("dns failure", message)
+
+    @patch("src.lambda_function.request.urlopen")
+    def test_returns_unhealthy_on_remote_disconnect(self, mock_urlopen):
+        mock_urlopen.side_effect = RemoteDisconnected("Remote end closed connection without response")
+
+        healthy, message = lambda_function.check_website("https://example.com", 5, {200})
+
+        self.assertFalse(healthy)
+        self.assertEqual(message, "Website request failed: remote server closed the connection.")
 
 
 class LambdaHandlerTests(unittest.TestCase):
