@@ -1,0 +1,112 @@
+name: Deploy AWS Lambda
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+  FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME || 'website-health-checker' }}
+  MANUAL_TEST_FUNCTION_NAME: ${{ vars.MANUAL_TEST_LAMBDA_FUNCTION_NAME || 'website-health-checker-manual-test' }}
+  TARGET_URL: ${{ vars.TARGET_URL }}
+  SCHEDULE_EXPRESSION: ${{ vars.LAMBDA_SCHEDULE_EXPRESSION || 'rate(5 minutes)' }}
+  REQUEST_TIMEOUT_SECONDS: ${{ vars.REQUEST_TIMEOUT_SECONDS || '10' }}
+  EXPECTED_STATUS_CODES: ${{ vars.EXPECTED_STATUS_CODES || '200' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Lambda function
+        uses: aws-actions/aws-lambda-deploy@v1.1.0
+        with:
+          function-name: ${{ env.FUNCTION_NAME }}
+          code-artifacts-dir: src
+          handler: lambda_function.lambda_handler
+          runtime: python3.13
+          role: ${{ secrets.LAMBDA_EXECUTION_ROLE_ARN }}
+          timeout: 30
+          memory-size: 256
+          publish: true
+          environment: >-
+            {
+              "TARGET_URL":"${{ env.TARGET_URL }}",
+              "TEXTMEBOT_PHONE":"${{ secrets.TEXTMEBOT_PHONE }}",
+              "TEXTMEBOT_API_KEY":"${{ secrets.TEXTMEBOT_API_KEY }}",
+              "REQUEST_TIMEOUT_SECONDS":"${{ env.REQUEST_TIMEOUT_SECONDS }}",
+              "EXPECTED_STATUS_CODES":"${{ env.EXPECTED_STATUS_CODES }}"
+            }
+
+      - name: Deploy manual TextMeBot test function
+        uses: aws-actions/aws-lambda-deploy@v1.1.0
+        with:
+          function-name: ${{ env.MANUAL_TEST_FUNCTION_NAME }}
+          code-artifacts-dir: src
+          handler: lambda_function.manual_test_handler
+          runtime: python3.13
+          role: ${{ secrets.LAMBDA_EXECUTION_ROLE_ARN }}
+          timeout: 30
+          memory-size: 256
+          publish: true
+          environment: >-
+            {
+              "TEXTMEBOT_PHONE":"${{ secrets.TEXTMEBOT_PHONE }}",
+              "TEXTMEBOT_API_KEY":"${{ secrets.TEXTMEBOT_API_KEY }}",
+              "REQUEST_TIMEOUT_SECONDS":"${{ env.REQUEST_TIMEOUT_SECONDS }}"
+            }
+
+      - name: Ensure EventBridge schedule exists
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RULE_NAME="${FUNCTION_NAME}-schedule"
+          RULE_ARN="$(aws events put-rule \
+            --name "${RULE_NAME}" \
+            --schedule-expression "${SCHEDULE_EXPRESSION}" \
+            --state ENABLED \
+            --query 'RuleArn' \
+            --output text)"
+
+          set +e
+          PERMISSION_OUTPUT="$(aws lambda add-permission \
+            --function-name "${FUNCTION_NAME}" \
+            --statement-id "${RULE_NAME}" \
+            --action lambda:InvokeFunction \
+            --principal events.amazonaws.com \
+            --source-arn "${RULE_ARN}" 2>&1)"
+          PERMISSION_EXIT_CODE=$?
+          set -e
+
+          if [[ ${PERMISSION_EXIT_CODE} -ne 0 && "${PERMISSION_OUTPUT}" != *"ResourceConflictException"* ]]; then
+            echo "${PERMISSION_OUTPUT}"
+            exit "${PERMISSION_EXIT_CODE}"
+          fi
+
+          aws events put-targets \
+            --rule "${RULE_NAME}" \
+            --targets "[{\"Id\":\"1\",\"Arn\":\"arn:aws:lambda:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:function:${FUNCTION_NAME}\"}]"
