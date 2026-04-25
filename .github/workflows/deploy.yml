@@ -55,7 +55,7 @@ jobs:
           environment: >-
             {
               "TARGET_URL":"${{ env.TARGET_URL }}",
-              "TEXTMEBOT_PHONE":"${{ secrets.TEXTMEBOT_PHONE }}",
+              "TEXTMEBOT_PHONES":"${{ secrets.TEXTMEBOT_PHONES }}",
               "TEXTMEBOT_API_KEY":"${{ secrets.TEXTMEBOT_API_KEY }}",
               "REQUEST_TIMEOUT_SECONDS":"${{ env.REQUEST_TIMEOUT_SECONDS }}",
               "EXPECTED_STATUS_CODES":"${{ env.EXPECTED_STATUS_CODES }}"
@@ -74,7 +74,7 @@ jobs:
           publish: true
           environment: >-
             {
-              "TEXTMEBOT_PHONE":"${{ secrets.TEXTMEBOT_PHONE }}",
+              "TEXTMEBOT_PHONES":"${{ secrets.TEXTMEBOT_PHONES }}",
               "TEXTMEBOT_API_KEY":"${{ secrets.TEXTMEBOT_API_KEY }}",
               "REQUEST_TIMEOUT_SECONDS":"${{ env.REQUEST_TIMEOUT_SECONDS }}"
             }

@@ -15,6 +15,12 @@ class ParseExpectedStatusCodesTests(unittest.TestCase):
     def test_parses_comma_separated_list(self):
         self.assertEqual(lambda_function.parse_expected_status_codes("200, 204,301"), {200, 204, 301})
 
+    def test_parses_comma_separated_recipients(self):
+        self.assertEqual(
+            lambda_function.parse_recipients("+10000000000, +20000000000"),
+            ["+10000000000", "+20000000000"],
+        )
+
 
 class CheckWebsiteTests(unittest.TestCase):
     @patch("src.lambda_function.request.urlopen")
@@ -63,47 +69,50 @@ class CheckWebsiteTests(unittest.TestCase):
 
 
 class LambdaHandlerTests(unittest.TestCase):
-    @patch("src.lambda_function.send_textmebot_alert")
+    @patch("src.lambda_function.send_textmebot_alerts")
     @patch("src.lambda_function.check_website")
-    def test_returns_200_without_alert_when_healthy(self, mock_check_website, mock_send_textmebot_alert):
+    def test_returns_200_without_alert_when_healthy(self, mock_check_website, mock_send_textmebot_alerts):
         mock_check_website.return_value = (True, "Website is healthy. HTTP 200.")
         os.environ["TARGET_URL"] = "https://example.com/"
-        os.environ["TEXTMEBOT_PHONE"] = "+10000000000"
+        os.environ["TEXTMEBOT_PHONES"] = "+10000000000,+20000000000"
         os.environ["TEXTMEBOT_API_KEY"] = "secret"
 
         response = lambda_function.lambda_handler({}, {})
 
         self.assertEqual(response["statusCode"], 200)
-        self.assertFalse(mock_send_textmebot_alert.called)
+        self.assertFalse(mock_send_textmebot_alerts.called)
         self.assertTrue(json.loads(response["body"])["healthy"])
 
-    @patch("src.lambda_function.send_textmebot_alert")
+    @patch("src.lambda_function.send_textmebot_alerts")
     @patch("src.lambda_function.check_website")
-    def test_returns_503_and_alert_payload_when_unhealthy(self, mock_check_website, mock_send_textmebot_alert):
+    def test_returns_503_and_alert_payload_when_unhealthy(self, mock_check_website, mock_send_textmebot_alerts):
         mock_check_website.return_value = (False, "Website returned HTTP 503.")
-        mock_send_textmebot_alert.return_value = {"status_code": 200, "body": "ok"}
+        mock_send_textmebot_alerts.return_value = [
+            {"recipient": "+10000000000", "status_code": 200, "body": "ok"},
+            {"recipient": "+20000000000", "status_code": 200, "body": "ok"},
+        ]
         os.environ["TARGET_URL"] = "https://example.com/"
-        os.environ["TEXTMEBOT_PHONE"] = "+10000000000"
+        os.environ["TEXTMEBOT_PHONES"] = "+10000000000,+20000000000"
         os.environ["TEXTMEBOT_API_KEY"] = "secret"
 
         response = lambda_function.lambda_handler({}, {})
 
         self.assertEqual(response["statusCode"], 503)
-        self.assertTrue(mock_send_textmebot_alert.called)
-        self.assertEqual(json.loads(response["body"])["alert"]["status_code"], 200)
+        self.assertTrue(mock_send_textmebot_alerts.called)
+        self.assertEqual(json.loads(response["body"])["alerts"][0]["status_code"], 200)
 
-    @patch("src.lambda_function.send_textmebot_alert")
-    def test_manual_test_handler_sends_message(self, mock_send_textmebot_alert):
-        mock_send_textmebot_alert.return_value = {"status_code": 200, "body": "ok"}
-        os.environ["TEXTMEBOT_PHONE"] = "+10000000000"
+    @patch("src.lambda_function.send_textmebot_alerts")
+    def test_manual_test_handler_sends_message(self, mock_send_textmebot_alerts):
+        mock_send_textmebot_alerts.return_value = [{"recipient": "+10000000000", "status_code": 200, "body": "ok"}]
+        os.environ["TEXTMEBOT_PHONES"] = "+10000000000"
         os.environ["TEXTMEBOT_API_KEY"] = "secret"
 
         response = lambda_function.manual_test_handler({"message": "ping from console"}, {})
 
         self.assertEqual(response["statusCode"], 200)
-        self.assertTrue(mock_send_textmebot_alert.called)
+        self.assertTrue(mock_send_textmebot_alerts.called)
         payload = json.loads(response["body"])
-        self.assertEqual(payload["alert"]["status_code"], 200)
+        self.assertEqual(payload["alerts"][0]["status_code"], 200)
         self.assertEqual(payload["message"], "Manual TextMeBot test message sent.")
 
 

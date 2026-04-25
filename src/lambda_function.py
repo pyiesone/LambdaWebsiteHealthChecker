@@ -40,6 +40,12 @@ def parse_expected_status_codes(raw_value: str | None) -> set[int]:
     return parsed
 
 
+def parse_recipients(raw_value: str | None) -> list[str]:
+    if not raw_value:
+        return []
+    return [item.strip() for item in raw_value.split(",") if item.strip()]
+
+
 def build_request(url: str) -> request.Request:
     return request.Request(
         url,
@@ -101,16 +107,32 @@ def send_textmebot_alert(recipient: str, api_key: str, message: str, timeout_sec
         }
 
 
-def get_notification_config() -> tuple[str, str, int]:
-    recipient = get_env("TEXTMEBOT_PHONE", required=True)
+def send_textmebot_alerts(recipients: Iterable[str], api_key: str, message: str, timeout_seconds: int) -> list[dict]:
+    results = []
+    for recipient in recipients:
+        alert_result = send_textmebot_alert(recipient, api_key, message, timeout_seconds)
+        results.append(
+            {
+                "recipient": recipient,
+                "status_code": alert_result["status_code"],
+                "body": alert_result["body"],
+            }
+        )
+    return results
+
+
+def get_notification_config() -> tuple[list[str], str, int]:
+    recipients = parse_recipients(get_env("TEXTMEBOT_PHONES"))
+    if not recipients:
+        raise ValueError("Missing required environment variable: TEXTMEBOT_PHONES")
     api_key = get_env("TEXTMEBOT_API_KEY", required=True)
     timeout_seconds = int(get_env("REQUEST_TIMEOUT_SECONDS", str(DEFAULT_TIMEOUT_SECONDS)))
-    return recipient, api_key, timeout_seconds
+    return recipients, api_key, timeout_seconds
 
 
 def lambda_handler(event, context):
     target_url = get_env("TARGET_URL", required=True)
-    recipient, api_key, timeout_seconds = get_notification_config()
+    recipients, api_key, timeout_seconds = get_notification_config()
     expected_status_codes = parse_expected_status_codes(get_env("EXPECTED_STATUS_CODES"))
 
     is_healthy, health_message = check_website(target_url, timeout_seconds, expected_status_codes)
@@ -129,8 +151,8 @@ def lambda_handler(event, context):
         }
 
     alert_message = build_alert_message(target_url, health_message)
-    alert_result = send_textmebot_alert(recipient, api_key, alert_message, timeout_seconds)
-    result["alert"] = alert_result
+    alert_results = send_textmebot_alerts(recipients, api_key, alert_message, timeout_seconds)
+    result["alerts"] = alert_results
 
     LOGGER.warning("Health check failed and alert was sent: %s", json.dumps(result))
     return {
@@ -140,17 +162,17 @@ def lambda_handler(event, context):
 
 
 def manual_test_handler(event, context):
-    recipient, api_key, timeout_seconds = get_notification_config()
+    recipients, api_key, timeout_seconds = get_notification_config()
     custom_message = None
     if isinstance(event, dict):
         custom_message = event.get("message")
 
     test_message = build_manual_test_message(custom_message)
-    alert_result = send_textmebot_alert(recipient, api_key, test_message, timeout_seconds)
+    alert_results = send_textmebot_alerts(recipients, api_key, test_message, timeout_seconds)
     result = {
         "healthy": True,
         "message": "Manual TextMeBot test message sent.",
-        "alert": alert_result,
+        "alerts": alert_results,
     }
     LOGGER.info("Manual TextMeBot test executed: %s", json.dumps(result))
     return {

@@ -23,7 +23,7 @@ Create a GitHub repository from this folder, then add these repository secrets:
 - `AWS_ROLE_TO_ASSUME`: IAM role ARN that GitHub Actions will assume through OIDC.
 - `AWS_ACCOUNT_ID`: your AWS account ID.
 - `LAMBDA_EXECUTION_ROLE_ARN`: IAM role ARN used by the Lambda function itself.
-- `TEXTMEBOT_PHONE`: your WhatsApp number in the format expected by TextMeBot.
+- `TEXTMEBOT_PHONES`: required. A comma-separated list of WhatsApp numbers in the format expected by TextMeBot.
 - `TEXTMEBOT_API_KEY`: your TextMeBot API key.
 
 Add these repository variables if you want to override defaults:
@@ -80,9 +80,10 @@ Or send a custom WhatsApp message:
 }
 ```
 
-The manual test Lambda uses the same `TEXTMEBOT_PHONE` and `TEXTMEBOT_API_KEY` secrets as the health checker. If the invocation succeeds, you should receive a WhatsApp message immediately.
+The manual test Lambda uses the same `TEXTMEBOT_PHONES` and `TEXTMEBOT_API_KEY` secrets as the health checker. If the invocation succeeds, every listed recipient should receive a WhatsApp message.
 
 ## Notes
 
 - The current implementation sends an alert on every failing invocation. If you want alert suppression or recovery notifications, add persistent state with DynamoDB or SSM Parameter Store.
+- Store recipients only in the GitHub repository secret `TEXTMEBOT_PHONES`, for example `+10000000000,+20000000000`.
 - TextMeBot's documented text message endpoint is `https://api.textmebot.com/send.php?recipient=[phone number]&apikey=[your apikey]&text=[text to send]`.
