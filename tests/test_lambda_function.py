@@ -84,7 +84,7 @@ class LambdaHandlerTests(unittest.TestCase):
 
         self.assertEqual(len(results), 2)
         self.assertEqual(mock_send_textmebot_alert.call_count, 2)
-        mock_sleep.assert_called_once_with(5)
+        mock_sleep.assert_called_once_with(10)
 
     @patch("src.lambda_function.request.urlopen")
     def test_send_textmebot_alert_returns_failure_on_http_error(self, mock_urlopen):

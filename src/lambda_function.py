@@ -15,7 +15,7 @@ LOGGER.setLevel(logging.INFO)
 TEXTMEBOT_ENDPOINT = "https://api.textmebot.com/send.php"
 DEFAULT_TIMEOUT_SECONDS = 10
 DEFAULT_EXPECTED_STATUS_CODES = {200}
-TEXTMEBOT_DELAY_SECONDS = 5
+TEXTMEBOT_DELAY_SECONDS = 10
 
 
 def get_env(name: str, default: str | None = None, required: bool = False) -> str:

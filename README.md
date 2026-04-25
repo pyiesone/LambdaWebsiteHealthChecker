@@ -13,7 +13,7 @@ This project deploys one AWS Lambda function that checks a website on a schedule
 1. EventBridge invokes the Lambda function on a schedule.
 2. The Lambda function sends an HTTP GET request to the URL defined in the GitHub repository variable `TARGET_URL`.
 3. If the site returns an unexpected status code or the request fails, the function calls TextMeBot's API to send a WhatsApp message to each phone number listed in the GitHub repository variable `TEXTMEBOT_PHONES`.
-4. When multiple recipients are configured, the function sends the first TextMeBot request immediately, waits 5 seconds, then sends the next request.
+4. When multiple recipients are configured, the function sends the first TextMeBot request immediately, waits 10 seconds, then sends the next request.
 
 The manual test Lambda sends WhatsApp test messages when you invoke it from the AWS console and returns delivery details for each recipient.
 
@@ -89,5 +89,5 @@ If TextMeBot rejects a request, the Lambda response includes per-recipient deliv
 
 - The current implementation sends an alert on every failing invocation. If you want alert suppression or recovery notifications, add persistent state with DynamoDB or SSM Parameter Store.
 - Store recipients only in the GitHub repository variable `TEXTMEBOT_PHONES`, for example `+10000000000,+20000000000`.
-- With multiple recipients, TextMeBot requests are sent sequentially with a 5-second delay between recipients.
+- With multiple recipients, TextMeBot requests are sent sequentially with a 10-second delay between recipients.
 - TextMeBot's documented text message endpoint is `https://api.textmebot.com/send.php?recipient=[phone number]&apikey=[your apikey]&text=[text to send]`.
